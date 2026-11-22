@@ -78,13 +78,13 @@ def search_manga(title, offset, limit, order_field, included, excluded, mode):
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def latest_chapter(manga_id, trans_lang):
-    """Chapter tertinggi yang tersedia, via /aggregate."""
+def _aggregate_latest(manga_id, trans_lang):
+    """Chapter tertinggi via /aggregate. Return nomor, 'tanpa nomor', atau None."""
     params = {} if trans_lang == "all" else {"translatedLanguage[]": [trans_lang]}
     volumes = api_get(f"/manga/{manga_id}/aggregate", params).get("volumes", {})
     if not isinstance(volumes, dict):  # MangaDex kirim [] kalau kosong
         return None
-    numbers = {}
+    numbers, unnumbered = {}, False
     for vol in volumes.values():
         chapters = vol.get("chapters", {})
         if not isinstance(chapters, dict):
@@ -93,8 +93,22 @@ def latest_chapter(manga_id, trans_lang):
             try:
                 numbers[float(key)] = key
             except ValueError:  # "none" = chapter tanpa nomor
-                pass
-    return numbers[max(numbers)] if numbers else None
+                unnumbered = True
+    if numbers:
+        return numbers[max(numbers)]
+    return "tanpa nomor" if unnumbered else None
+
+
+def latest_chapter(manga_id, trans_lang):
+    """Return (chapter, sumber). Kalau bahasa terpilih kosong, coba semua bahasa."""
+    ch = _aggregate_latest(manga_id, trans_lang)
+    if ch:
+        return ch, trans_lang
+    if trans_lang != "all":
+        ch = _aggregate_latest(manga_id, "all")
+        if ch:
+            return ch, "semua bahasa"
+    return None, None
 
 
 @st.cache_data(ttl=86400, show_spinner=False, max_entries=500)
@@ -141,16 +155,21 @@ def build_row(m, trans_lang, with_chapters):
     # tamat -> lastChapter metadata; ongoing -> chapter terbaru dari /aggregate
     last_meta = a.get("lastChapter")
     last_meta = last_meta if last_meta and last_meta != "0" else None
+    jumlah, sumber = None, None
     if status == "completed" and last_meta:
-        jumlah = last_meta
-    elif with_chapters:
-        jumlah = latest_chapter(m["id"], trans_lang) or last_meta or "-"
+        jumlah, sumber = last_meta, "metadata"
     else:
-        jumlah = last_meta or "-"
+        if with_chapters:
+            jumlah, sumber = latest_chapter(m["id"], trans_lang)
+        if not jumlah and last_meta:
+            jumlah, sumber = last_meta, "metadata"
+        if not jumlah:
+            jumlah, sumber = "-", "tidak ditemukan"
 
     return {
         "judul_manhwa": pick_title(a),
         "jumlah_chapter": jumlah,
+        "sumber_chapter": sumber,
         "status": status,
         "genre": ", ".join(genres) if genres else "-",
         "cover": cover,
