@@ -60,6 +60,7 @@ def build_params(title, offset, limit, order_field, included, excluded, mode):
         "includes[]": ["cover_art"],
         "originalLanguage[]": ["ko"],  # ko = manhwa
         "contentRating[]": ["safe", "suggestive"],
+        "hasAvailableChapters": "true",  # sembunyikan judul tanpa chapter
         f"order[{order_field}]": "desc",
     }
     if title:
@@ -237,14 +238,17 @@ try:
     items = result.get("data", [])
     total = result.get("total", 0)
 
-    rows = []
+    rows, hidden = [], 0
     if items:
         bar = st.progress(0.0, text="Memproses hasil…")
         for i, m in enumerate(items, start=1):
             row = build_row(m, trans_lang, with_chapters)
-            if cover_via_server and row["cover"]:
-                fetch_cover(row["cover"])
-            rows.append(row)
+            if with_chapters and row["jumlah_chapter"] == "-":
+                hidden += 1  # tidak ada chapter -> jangan ditampilkan
+            else:
+                if cover_via_server and row["cover"]:
+                    fetch_cover(row["cover"])
+                rows.append(row)
             bar.progress(i / len(items), text=f"Memproses hasil… ({i}/{len(items)})")
         bar.empty()
 except RuntimeError as e:
@@ -258,7 +262,8 @@ if not rows:
     st.info("Tidak ada hasil untuk kombinasi filter ini.")
     st.stop()
 
-st.write(f"**{total:,}** hasil · menampilkan {offset + 1}–{offset + len(rows)}")
+st.write(f"**{total:,}** hasil · halaman ini {len(rows)} judul"
+         + (f" ({hidden} disembunyikan karena tanpa chapter)" if hidden else ""))
 
 tab_table, tab_cards = st.tabs(["📋 Tabel", "🖼️ Kartu"])
 
